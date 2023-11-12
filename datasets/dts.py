@@ -1,13 +1,14 @@
 import h5py
 import os
 import torch
+import random
 
 from torch import nn
 from torch.utils.data import Dataset
 import dgl
 
 class WaterDataset(Dataset):
-    def __init__(self, path, pos_filter = None, testing = False):
+    def __init__(self, path, pos_filter = None, total_points = 600, testing = False):
         self._path = path
         with h5py.File(path, 'r') as f:
             self._keys = list(f.keys())
@@ -18,19 +19,22 @@ class WaterDataset(Dataset):
             self.pos_filter = self.__pos_filter
         else:
             self.pos_filter = pos_filter
+            
+        self.total_points = total_points
     
     def __pos_filter(self, coords):
         # print(coords.shape)
-        first_layer = coords[...,2] < 4
-        random_select = torch.randint(0, 2, (coords.shape[0],)).bool()
+        select = coords[...,2] < 4
+        showids = torch.randperm(coords.shape[0])[:random.randint(0, coords.shape[0])]
+        select[showids] = True
         #print(random_select)
         # print(first_layer.shape, random_select.shape)
-        return torch.logical_or(first_layer, random_select)
+        return select
     
     def __len__(self):
         return self._len
     
-    def __further_sample(self, coords, num_points, cutoff = 0.05, mul = 1):
+    def __further_sample(self, coords, num_points, cutoff = 0.1, mul = 1):
         n = num_points
         samples = torch.rand(n * mul, 3) * 2 -1
         cdist = torch.cdist(coords, samples)
@@ -53,24 +57,22 @@ class WaterDataset(Dataset):
         known_mask = self.pos_filter(pos)
         pos = pos / real_size - 1
         known_pos = pos[known_mask]
-        pos_pos = pos
-        neg_pos = self.__further_sample(pos, len(pos))
         
-        g_known = dgl.knn_graph(known_pos, 10)
+        pos_pos = pos
+        neg_pos = self.__further_sample(pos, self.total_points - len(pos))
+        
+        g_known = dgl.knn_graph(known_pos, 4)
         g_known.ndata['pos'] = known_pos
         
-        g_pos = dgl.graph(([], []), num_nodes=len(pos_pos))
-        g_pos.ndata['pos'] = pos_pos
-        
-        g_neg = dgl.graph(([], []), num_nodes=len(neg_pos))
-        g_neg.ndata['pos'] = neg_pos
+        test_pos = torch.cat((pos_pos, neg_pos), dim=0)
+        test_label = torch.cat((torch.ones(len(pos_pos), 1), torch.zeros(len(neg_pos), 1)), dim=0)
         
         hfile.close()
-        return file_name, g_known, g_pos, g_neg
+        return file_name, g_known, test_pos, test_label
 
 def collate_fn(batch):
-    file_names, g_known, g_pos, g_neg = zip(*batch)
+    file_names, g_known, test_pos, test_label = zip(*batch)
     g_known = dgl.batch(g_known)
-    g_pos = dgl.batch(g_pos)
-    g_neg = dgl.batch(g_neg)
-    return file_names, g_known, g_pos, g_neg
+    test_pos = torch.stack(test_pos, dim=0)
+    test_label = torch.stack(test_label, dim=0)
+    return file_names, g_known, test_pos, test_label
