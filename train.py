@@ -22,8 +22,8 @@ def main(cfg):
     print("\n".join(model_structure(net)))
     dts = WaterDataset("../data/ice_16A_small_train.hdf5", testing = False)
     test_dts = WaterDataset("../data/ice_16A_small_test.hdf5")
-    dtl = DataLoader(dts, batch_size = 32, shuffle = True, collate_fn = collate_fn)
-    test_dtl = DataLoader(test_dts, batch_size= 32, collate_fn = collate_fn)
+    dtl = DataLoader(dts, batch_size = 8, shuffle = True, collate_fn = collate_fn, num_workers=0, pin_memory=True)
+    test_dtl = DataLoader(test_dts, batch_size= 8, collate_fn = collate_fn, num_workers=0, pin_memory=True)
     opt = torch.optim.Adam([
         {'params': [p for p in net.parameters() if "brunch" in p.names], 'lr': 1e-3},
         {'params': [p for p in net.parameters() if "brunch" not in p.names], 'lr': 1e-4}
@@ -41,7 +41,7 @@ def main(cfg):
         net.requires_grad_(True)
         #TRAIN
         for i, (file_name, known_graph, test_points, test_labels) in enumerate(bar):
-            known_graph = known_graph.to(device, non_blocking = True)
+            known_graph = dgl.batch(known_graph).to(device, non_blocking = True)
             test_points = test_points.to(device, non_blocking = True)
             test_labels = test_labels.to(device, non_blocking = True)
             
@@ -75,7 +75,7 @@ def main(cfg):
         net.requires_grad_(False)
         #TEST
         for i, (file_name, known_graph, test_points, test_labels) in enumerate(bar):
-            known_graph = known_graph.to(device, non_blocking = True)
+            known_graph = dgl.batch(known_graph).to(device, non_blocking = True)
             test_points = test_points.to(device, non_blocking = True)
             test_labels = test_labels.to(device, non_blocking = True)
             
@@ -94,7 +94,7 @@ def main(cfg):
             model_save(net, f"{work_dir}/net_{epoch+1}_{mean_loss:.2e}.pkl")
             saved = "saved"
         else:
-            saved = "not saved"
+            saved = "not saved" 
             
         print(f"Testing [{epoch+1}/{epochs}]: Loss {mean_loss:.3f}, Model {saved}.")
         #SAMPLE
@@ -105,9 +105,7 @@ def main(cfg):
         
         test_points = test_points[test_labels.squeeze()==1]
         sample_points = torch.rand(10000, 3, device = device) * 2 - 1
-        g = dgl.graph(([], []), num_nodes = len(sample_points))
-        g.ndata['pos'] = sample_points
-        
+
         conf = net(known_graph, sample_points[None])
         conf = conf.sigmoid().squeeze()
         mask = conf > 0.5
@@ -124,9 +122,9 @@ def main(cfg):
         ax1.set_title("Ground Truth")
         ax2.set_title("Prediction")
         
-        known_graph = known_graph.to('cpu')
+        sample_points = sample_points.detach().cpu().numpy()
+        known_points = known_graph.ndata['pos'].detach().cpu().numpy()
         
-        known_points = known_graph.ndata['pos']
         ax = ax1.scatter(test_points[:, 0], test_points[:, 1], test_points[:, 2], c = "r", s = 1, alpha = 0.5, label = "all")
         ax = ax1.scatter(known_points[:, 0], known_points[:, 1], known_points[:, 2], c = "b", s = 1, alpha = 1.0, label = "known")
         
@@ -136,7 +134,6 @@ def main(cfg):
         plt.legend()
         plt.tight_layout()
         plt.savefig(f"{work_dir}/sample_{epoch+1}_{mean_loss:.1f}.png")
-        plt.close()
 
 if __name__ == "__main__":
     main()

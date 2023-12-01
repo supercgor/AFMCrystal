@@ -16,13 +16,13 @@ class WaterDataset(Dataset):
             if testing:
                 self._len = 100
         if pos_filter is None:
-            self.pos_filter = self.__pos_filter
+            self.pos_filter = self._pos_filter
         else:
             self.pos_filter = pos_filter
             
         self.total_points = total_points
     
-    def __pos_filter(self, coords):
+    def _pos_filter(self, coords):
         # print(coords.shape)
         select = coords[...,2] < 4
         showids = torch.randperm(coords.shape[0])[:random.randint(0, coords.shape[0])]
@@ -34,7 +34,7 @@ class WaterDataset(Dataset):
     def __len__(self):
         return self._len
     
-    def __further_sample(self, coords, num_points, cutoff = 0.1, mul = 1):
+    def _further_sample(self, coords, num_points, cutoff = 0.1, mul = 1):
         n = num_points
         samples = torch.rand(n * mul, 3) * 2 -1
         cdist = torch.cdist(coords, samples)
@@ -42,7 +42,7 @@ class WaterDataset(Dataset):
         # cdist = cdist[:, cdist_match].sum(dim=0)
         samples = samples[cdist_match][:num_points]
         if samples.shape[0] < n:
-            samples = torch.cat((samples, self.__further_sample(coords, n - samples.shape[0], cutoff, mul+1)))
+            samples = torch.cat((samples, self._further_sample(coords, n - samples.shape[0], cutoff, mul+1)))
         return samples
         
     def __getitem__(self, idx):
@@ -57,11 +57,10 @@ class WaterDataset(Dataset):
         known_mask = self.pos_filter(pos)
         pos = pos / real_size - 1
         known_pos = pos[known_mask]
+        pos_pos = pos[~known_mask]
+        neg_pos = torch.cat([known_pos, self._further_sample(pos, self.total_points - len(pos))], dim=0)
         
-        pos_pos = pos
-        neg_pos = self.__further_sample(pos, self.total_points - len(pos))
-        
-        g_known = dgl.knn_graph(known_pos, 4)
+        g_known = dgl.knn_graph(known_pos, 6)
         g_known.ndata['pos'] = known_pos
         
         test_pos = torch.cat((pos_pos, neg_pos), dim=0)

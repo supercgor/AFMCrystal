@@ -76,6 +76,7 @@ class NodeDeepOnet(nn.Module):
             self.act,
             nn.Linear(hidden_size, hidden_size),
             self.act,
+            nn.Linear(hidden_size, hidden_size),
         )
         
         self.out = nn.Sequential(
